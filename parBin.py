@@ -2,6 +2,8 @@ import re
 import struct
 import sys
 import traceback
+import logging
+logging.basicConfig(level=logging.DEBUG)
 #example grammar:
 #
 #{
@@ -47,29 +49,30 @@ class InvalidToken(Exception):
 	def __str__(self):
 		return "Token %s didn't match any allowed type"%self.token
 
-literal = re.compile(r"(?P<type>[lsr])'(?P<value>.+)'(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$")
+literal = re.compile(r"(?P<type>[lsr])'(?P<value>.+)'(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$",re.DOTALL)
 name = re.compile(r"(?P<value>[a-zA-Z_]*)(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$")
 
 def parseSeq(data,position,token):
 	offset = len(token['value'])
-	print 'sequence test:',token['value'],data[position:position+offset]
+	logging.debug('sequence test: %s %s'%(token['value'],data[position:position+offset]))
 	if token['value'] == data[position:position+offset]:
 		return (offset,token['value'])
-	raise Exception, 'sequence literal did not match'
+	raise Exception, 'sequence literal "%s" did not match'%token['value']
 
 def parseRegex(data,position,token):
+	logging.debug('testing regex %s'%token['value'])
 	match = re.match(token['value'],data[position:])
 	if not match:
-		raise Exception, 'did not match regex in sequence'
+		raise Exception, 'did not match regex "%s" in sequence'%token['value']
 	else:
-		offset = match.end
+		offset = match.end()
 		return (offset,match.group())
 
 def parseForm(data,position,token):
 	offset = struct.calcsize(token['value'])
-	print 'parsing',token['value']
+	logging.debug('parsing %s'%token['value'])
 	val = struct.unpack(token['value'],data[position:position+offset])
-	print val
+	logging.debug(str(val))
 	if len(val)==1:
 		return offset,val[0]
 	else:
@@ -78,7 +81,7 @@ def parseForm(data,position,token):
 tokenTypes = [('literal',literal),('name',name)]
 parsers = {'l':parseSeq,'s':parseForm,'r':parseRegex}
 def checkToken(token, rexprs):
-	print token
+	logging.debug(token)
 	for name, expr in rexprs:
 		m = expr.match(token)
 		if m:
@@ -96,6 +99,8 @@ def checkToken(token, rexprs):
 				gdict['max']=1
 			if name == 'literal':
 				gdict['parser']=parsers[gdict['type']]
+				if gdict['type'] == 'r':
+					gdict['value'] = re.compile(gdict['value'],re.DOTALL)
 			return gdict
 	raise InvalidToken(token)
 
@@ -105,7 +110,7 @@ def parseGrammar(gram):
 			raise GrammarKeyException(key)
 	grammar = {}
 	for key in gram:
-		keyOptions = [[checkToken(t,tokenTypes) for t in x.split()] for x in gram[key].split("|")]
+		keyOptions = [[checkToken(t,tokenTypes) for t in re.split('[ \t]+',x)] for x in gram[key].split("|")]
 		grammar[key] = keyOptions
 	return grammar
 
@@ -113,7 +118,7 @@ def parseGrammar(gram):
 
 class ResultObj(object):
 	def __init__(self,props):
-		print props
+		logging.debug(props)
 		for name,val in props:
 			setattr(self,name,val)
 			#setattr(self,name,property(lambda:val))
@@ -136,7 +141,7 @@ def parseMultiple(data,position,token,handler):
 			results.append(val)
 			numfound+=1
 		except Exception as e:
-			print e
+			logging.warn(e)
 			break
 	if numfound<min:
 		raise Exception, 'did not match'
@@ -148,21 +153,19 @@ def parseMultiple(data,position,token,handler):
 	return offset,results
 
 def parseData(grammar,node,data,position):
-	print 'node',node
+	logging.debug('node %s'%node)
 	for option in grammar[node]:
 		offset = 0
 		elms = []
 		try:
-			print option
+			logging.debug(option)
 			for token in option:
 				type=token['tokenType']	
 				if type == 'literal':
 					off,val = parseMultiple(data,position+offset,token,lambda d,p,t:parseLiteral(d,p,t))
-					print 'reached'
 					if token['name']:
 						elms.append((token['name'],val))
 					offset+=off
-					print 'reached',val
 				if type == 'name':
 					off,val = parseMultiple(data,position+offset,token,lambda d,p,t:parseData(grammar,token['value'],d,p))
 					offset+=off
@@ -172,8 +175,8 @@ def parseData(grammar,node,data,position):
 						elms.append((token['value'],val))
 			return offset,ResultObj(elms)
 		except Exception as e:
-			traceback.print_exc()
-			print e,2
+			logging.warn(traceback.format_exc(limit=None,chain=True))
+			logging.warn(e)
 	raise Exception, "data did not match grammar"
 
 def makeGrammar(gramDict,startname):
