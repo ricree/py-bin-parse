@@ -10,9 +10,28 @@ import traceback
 #	l'stop'\type",
 #}
 #
+#grammar format:
+#{
+#	<name>: "<term1> <term2>..." #one or more terms separated by spaces
+#}
 #
+#grammar term:
+#<type>'<format>'\<identifier>
+#or
+#<namedTerm>\<identifier>
+#type is:
+#s : format string for unpacking with struct moduke
+#r : string matching a regex
+#l : string literal
 #
+#format:
+#type dependent
+#either struct format string, or the literal string depending on the type
 #
+#identifier(optional):
+#name the value is stored under in result
+
+
 
 class GrammarKeyException(Exception):
 	def __init__(self,value):
@@ -28,7 +47,7 @@ class InvalidToken(Exception):
 	def __str__(self):
 		return "Token %s didn't match any allowed type"%self.token
 
-literal = re.compile(r"(?P<type>[ls])'(?P<value>.+)'(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$")
+literal = re.compile(r"(?P<type>[lsr])'(?P<value>.+)'(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$")
 name = re.compile(r"(?P<value>[a-zA-Z_]*)(/(?P<name>[a-zA-Z_]+))?(?P<multiple>[*+])?$")
 
 def parseSeq(data,position,token):
@@ -37,6 +56,14 @@ def parseSeq(data,position,token):
 	if token['value'] == data[position:position+offset]:
 		return (offset,token['value'])
 	raise Exception, 'sequence literal did not match'
+
+def parseRegex(data,position,token):
+	match = re.match(token['value'],data[position:])
+	if not match:
+		raise Exception, 'did not match regex in sequence'
+	else:
+		offset = match.end
+		return (offset,match.group())
 
 def parseForm(data,position,token):
 	offset = struct.calcsize(token['value'])
@@ -49,7 +76,7 @@ def parseForm(data,position,token):
 		return offset, list(val)
 
 tokenTypes = [('literal',literal),('name',name)]
-parsers = {'l':parseSeq,'s':parseForm}
+parsers = {'l':parseSeq,'s':parseForm,'r':parseRegex}
 def checkToken(token, rexprs):
 	print token
 	for name, expr in rexprs:
